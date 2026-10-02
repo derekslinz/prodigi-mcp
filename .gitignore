@@ -1,6 +1,29 @@
 node_modules/
 dist/
 *.log
+coverage/
 .env
 .env.*
 !.env.example
+
+# MCP client configs.
+#
+# .mcp.json holds a Prodigi API key when registered via `setup.js --key`, and the
+# installer also leaves timestamped copies such as
+# `.mcp.json.bak-2026-10-03T01-15-00-000Z` that contain the key in plaintext.
+# A bare `.mcp.json` rule covers neither the backups nor future variants, so
+# ignore the whole family.
+.mcp.json
+.mcp.json.*
+!.mcp.json.example
+
+# Backups written by setup.js for any config it edits, e.g.
+# .claude.json.bak-* and claude_desktop_config.json.bak-*.
+*.bak-*
+!*.example
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json

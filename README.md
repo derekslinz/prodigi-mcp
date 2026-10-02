@@ -55,16 +55,97 @@ is the expensive mistake to avoid.
 
 ### Claude Desktop / Claude Code
 
+Rather than hand-editing JSON, register the server with the bundled installer:
+
+```bash
+npm run build
+node dist/setup.js --interactive
+```
+
+It detects installed clients, backs up the config before writing, preserves
+unrelated entries and key ordering, and is safe to re-run — an existing entry is
+updated rather than duplicated.
+
+```bash
+node dist/setup.js --environment sandbox
+node dist/setup.js --client claude-desktop --environment live --key <key>
+node dist/setup.js --print-config --environment sandbox   # preview only
+```
+
+| Flag | Effect |
+| --- | --- |
+| `-i`, `--interactive` | Ask before each change |
+| `-n`, `--dry-run` | Report what would change without writing |
+| `-p`, `--print-config` | Print the resulting `mcpServers` JSON and exit |
+| `--no-redact` | With `--print-config`, show secrets unmasked |
+| `--client <id>` | `claude-desktop`, `claude-code`, or `claude-code-project` |
+| `--project-dir <path>` | Repository for `--client claude-code-project` |
+| `--key <key>` | Embed a key; omit to rely on the client's own environment |
+| `--environment <env>` | `sandbox` or `live` — **required**, or asked under `-i` |
+
+`--print-config` redacts anything key-shaped by default, including keys belonging
+to *other* MCP servers already in the config. It writes nothing.
+
+### The environment is never assumed
+
+`--environment` is required unless you pass `--interactive`, which asks first.
+There is deliberately no default. A sandbox key pointed at live simply fails
+authentication, but a live key silently treated as sandbox is worse — and
+guessing wrong about *which* key you hold is how that happens. Pick
+deliberately; `production` is accepted as a synonym for `live`.
+
+```bash
+node dist/setup.js -i
+# Environment - sandbox (no real orders, nothing charged) or live
+# (real orders, billed)? [s/l]: l
+# Prodigi API key (blank to use the client's environment): 
+```
+
+Answers of `s`/`sandbox` and `l`/`live` are both accepted; anything else is
+rejected rather than guessed at.
+
+### Project scope requires an explicit directory
+
+`claude-code-project` writes `.mcp.json` into a repository, so it needs
+`--project-dir`. The current directory is never assumed:
+
+```bash
+node dist/setup.js --client claude-code-project \
+  --project-dir ../my-app --environment sandbox
+```
+
+Without it the command fails rather than dropping a `.mcp.json` into whatever
+directory you happened to run from — including this repository. Prefer user scope
+(`claude-code`, the default) when you don't need a per-repo config.
+
+### Project scope and secrets
+
+Combining `--project-dir` with `--key` would put a live credential in a
+committable file, so the installer adds `.mcp.json` to *that repository's*
+`.gitignore` automatically:
+
+```bash
+node dist/setup.js --client claude-code-project --project-dir ../my-app \
+  --environment live --key <key>
+#   added    Claude Code (project: ../my-app) -> ../my-app/.mcp.json
+#            added .mcp.json to .gitignore (it holds your API key)
+```
+
+Omit `--key` and nothing is ignored — the config stays shareable and each
+contributor supplies their own key.
+
+If `.mcp.json` was already committed before this protection existed, the
+installer warns that it is still tracked and needs `git rm --cached .mcp.json`.
+Rotate the key if it was ever pushed.
+
+To configure manually instead:
+
 ```json
 {
   "mcpServers": {
     "prodigi": {
       "command": "node",
-      "args": ["/absolute/path/to/prodigi-mcp/dist/index.js"],
-      "env": {
-        "PRODIGI_API_KEY": "your-sandbox-key",
-        "PRODIGI_ENVIRONMENT": "sandbox"
-      }
+      "args": ["/absolute/path/to/prodigi-mcp/dist/index.js"]
     }
   }
 }

@@ -6,7 +6,8 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "prodigi-mcp": "dist/index.js"
+    "prodigi-mcp": "dist/index.js",
+    "prodigi-mcp-setup": "dist/setup.js"
   },
   "main": "dist/index.js",
   "files": [
