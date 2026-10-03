@@ -20,8 +20,9 @@ export function registerQuoteTools(server: McpServer, api: ProdigiApi): void {
         "an order. Returns one quote per shipping method, each with the item " +
         "cost, shipping cost, per-shipment courier and fulfilling lab, and the " +
         "per-item unit cost. Use this to show a customer their options and to " +
-        "check the basket is valid before calling prodigi_create_order. Omit " +
-        "shippingMethod to get all five tiers for comparison.",
+        "confirm the basket is valid - a quote that succeeds is strong evidence " +
+        "the SKUs, attributes and destination all work. Omit shippingMethod to " +
+        "get all tiers for comparison.",
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
       inputSchema: {
         destinationCountryCode: z

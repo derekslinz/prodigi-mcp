@@ -101,10 +101,6 @@ export interface Asset {
   pageCount?: number;
 }
 
-export interface BrandingAsset {
-  url: string;
-}
-
 export type BrandingKey =
   | "postcard"
   | "flyer"
@@ -114,17 +110,6 @@ export type BrandingKey =
   | "sticker_exterior_rectangle"
   | "sticker_interior_round"
   | "sticker_interior_rectangle";
-
-export interface Branding {
-  postcard?: BrandingAsset;
-  flyer?: BrandingAsset;
-  packing_slip_bw?: BrandingAsset;
-  packing_slip_color?: BrandingAsset;
-  sticker_exterior_round?: BrandingAsset;
-  sticker_exterior_rectangle?: BrandingAsset;
-  sticker_interior_round?: BrandingAsset;
-  sticker_interior_rectangle?: BrandingAsset;
-}
 
 export interface ChargeItem {
   id?: string;
@@ -141,14 +126,29 @@ export interface Charge {
   items?: ChargeItem[];
 }
 
+/* -------------------------------------------------------------------------- */
+/* Order object                                                                */
+/* -------------------------------------------------------------------------- */
+
+export interface BrandingAsset {
+  url: string;
+}
+
+export interface Branding {
+  postcard?: BrandingAsset;
+  flyer?: BrandingAsset;
+  packing_slip_bw?: BrandingAsset;
+  packing_slip_color?: BrandingAsset;
+  sticker_exterior_round?: BrandingAsset;
+  sticker_exterior_rectangle?: BrandingAsset;
+  sticker_interior_round?: BrandingAsset;
+  sticker_interior_rectangle?: BrandingAsset;
+}
+
 export interface PackingSlip {
   url: string;
   status?: string;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Order object                                                                */
-/* -------------------------------------------------------------------------- */
 
 export interface Order {
   id: string;
@@ -185,58 +185,8 @@ export interface OrderItem {
 export type Sizing = "fillPrintArea" | "fitPrintArea" | "stretchToPrintArea";
 
 /* -------------------------------------------------------------------------- */
-/* Request payloads                                                            */
-/* -------------------------------------------------------------------------- */
-
-export interface RequestAsset {
-  printArea: string;
-  url: string;
-  md5Hash?: string;
-  pageCount?: number;
-}
-
-export interface RequestOrderItem {
-  merchantReference?: string;
-  sku: string;
-  copies: number;
-  sizing: Sizing;
-  attributes?: Record<string, string>;
-  assets: RequestAsset[];
-  recipientCost?: Cost;
-}
-
-/**
- * Recipient as sent on order create / update. The API accepts `null` for the
- * optional contact fields, so they are nullable as well as optional here.
- */
-export interface RequestRecipient {
-  name: string;
-  email?: string | null;
-  phoneNumber?: string | null;
-  address: Address;
-}
-
-/* -------------------------------------------------------------------------- */
 /* Order actions                                                               */
 /* -------------------------------------------------------------------------- */
-
-export interface ActionsAvailability {
-  isAvailable: "Yes" | "No";
-}
-
-export interface OrderActions {
-  cancel: ActionsAvailability;
-  changeRecipientDetails: ActionsAvailability;
-  changeShippingMethod: ActionsAvailability;
-  changeMetaData: ActionsAvailability;
-}
-
-export interface ShipmentUpdateResult {
-  shipmentId: string;
-  successful: boolean;
-  errorCode?: string;
-  description?: string;
-}
 
 /* -------------------------------------------------------------------------- */
 /* Quotes                                                                      */
@@ -310,18 +260,6 @@ export interface ProductVariant {
     string,
     { horizontalResolution: number; verticalResolution: number }
   >;
-}
-
-export interface CreateOrderRequest {
-  merchantReference?: string;
-  callbackUrl?: string;
-  shippingMethod: string;
-  idempotencyKey?: string;
-  recipient: RequestRecipient;
-  branding?: Branding;
-  items: RequestOrderItem[];
-  metadata?: Record<string, unknown>;
-  packingSlip?: PackingSlip;
 }
 
 /* -------------------------------------------------------------------------- */

@@ -16,15 +16,21 @@ fulfilment.
 | `prodigi_get_product` | Full SKU definition: valid attributes, print areas, resolutions, destinations |
 | `prodigi_get_spine_info` | Photobook spine width in mm for a page count and destination |
 | `prodigi_create_quote` | Price a basket per shipping tier, with courier and lab breakdown |
-| `prodigi_create_order` | Submit a real, billable order |
 | `prodigi_get_order` | Full order: status, stages, shipments, tracking, charges |
 | `prodigi_list_orders` | Filtered, auto-paginated order list |
-| `prodigi_get_order_actions` | Which changes are still permitted on an order |
-| `prodigi_cancel_order` | Cancel an order (refund depends on fulfilment stage) |
-| `prodigi_update_shipping_method` | Change shipping tier before fulfilment |
-| `prodigi_update_recipient` | Correct address or contact details |
-| `prodigi_update_order_metadata` | Replace the order's JSON metadata |
 | `prodigi_get_configuration` | Report the active environment with a masked key |
+
+### Read-only by design
+
+This server exposes **no tool that creates, changes or cancels an order**, and
+there is no configuration flag that enables one. Placing and cancelling real
+orders is irreversible, and Prodigi's refund behaviour changes once fulfilment
+starts — full refund before, shipping-only after.
+
+The write endpoints are therefore absent rather than disabled. They cannot be
+called, retried after a refusal, or offered to a model as an option. If you need
+order placement, keep it in your own application and use this server to validate
+SKUs, price baskets, and read order status.
 
 ### Resources
 
@@ -156,15 +162,18 @@ does the same thing.
 
 ## How the tools are meant to be used
 
-The correct sequence is always **look up → quote → order**:
+The sequence is **look up → quote**:
 
 1. `prodigi_get_product` for every SKU. Attributes, print areas and shipping
    destinations all vary per product, and guessing any of them is the most
    common cause of a rejected order.
 2. `prodigi_create_quote` for the destination country. This prices items and
-   shipping per tier and reveals which labs and couriers would fulfil it.
-3. `prodigi_create_order` once the customer has actually committed. This
-   charges the account and begins fulfilment.
+   shipping per tier and reveals which labs and couriers would fulfil it. A quote
+   that succeeds is strong evidence the SKUs, attributes and destination all
+   work.
+
+From there, hand the basket to your own ordering system. This server stops short
+of placing it.
 
 ### Things that will bite you
 
@@ -173,29 +182,36 @@ The correct sequence is always **look up → quote → order**:
   marked `Invalid`.
 - `countryCode` is ISO 3166-1 **alpha-2** (`US`, `GB`); `currency` is ISO 4217
   **alpha-3** (`USD`, `GBP`); amounts are **decimal strings** (`"15.00"`).
-- `sizing` defaults to `fillPrintArea` (crop to fill) and `printArea` defaults to
-  `default`, so the common case needs no extra fields.
+- `sizing` is **required** on every order item — `fillPrintArea`, `fitPrintArea`
+  or `stretchToPrintArea`. Prodigi rejects an order that omits it.
+- Most products require **every** attribute, not just the obvious one. A canvas
+  needs `edge`, `frame`, `paperType`, `substrateWeight` and `wrap`.
 - Only PNG and JPEG are resized — **PDFs print at their native size**.
 - Photobooks need both a `pageCount` on the page asset and a separate `spine`
   asset sized from `prodigi_get_spine_info`.
 - Include `recipientCost` and recipient `email`/`phoneNumber` on international
   orders; couriers need them to clear customs.
-- Use `idempotencyKey` on any order submission that could be retried. It is not
-  the same as `merchantReference`, which is free-form and not deduplicated.
+- Use an `idempotencyKey` on any order submission that could be retried. Without
+  one, two identical requests create two separately printed and billed orders.
+  It is not the same as `merchantReference`, which is free-form and not
+  deduplicated.
 
-### Actions narrow as the order progresses
+### Reading order status
 
-Cancel, recipient and shipping changes stop working once fulfilment starts and
-return `actionNotAvailable`. Check `prodigi_get_order_actions` first. Metadata
-updates remain available throughout. When Prodigi can only apply part of a
-change it returns `partiallyUpdated` plus per-shipment results — the server
-surfaces those rather than reporting a blanket success.
+An order moves through assets downloaded → print-ready preparation → lab
+allocation → production → shipping → complete. `status.stage` is `InProgress`,
+`Complete` or `Cancelled`; `status.details` gives per-stage state and is the best
+answer to "where is my order".
+
+If the account requires **manual order approval**, submitted orders are invisible
+to the API until released. `prodigi_list_orders` returns empty and
+`prodigi_get_order` returns `entityNotFound` for an order that genuinely exists —
+treat "not found" as ambiguous rather than conclusive.
 
 ### Callbacks
 
-This server polls; it does not receive Prodigi's CloudEvents webhooks. Supply
-`callbackUrl` when creating an order and build your own receiver if you need
-push-based updates.
+This server polls; it does not receive Prodigi's CloudEvents webhooks. Build your
+own receiver if you need push-based updates.
 
 ## Development
 
@@ -206,47 +222,42 @@ npm test            # build, then run the suite
 node scripts/smoke.mjs   # boot the real stdio server and inspect the surface
 ```
 
-Two scripts exercise a real Prodigi account:
+`scripts/live-check.mjs` exercises the read-only tools against a real account:
 
 ```bash
-# Read-only: product, quote and order-read endpoints. Safe on live.
 PRODIGI_API_KEY=... PRODIGI_ENVIRONMENT=live node scripts/live-check.mjs
-
-# Full order lifecycle: create -> update -> cancel. SANDBOX ONLY.
-# Refuses to run against live without PRODIGI_ALLOW_LIVE=1.
-PRODIGI_API_KEY=... PRODIGI_ENVIRONMENT=sandbox node scripts/sandbox-order-check.mjs
 ```
+
+It calls product, quote and order-read endpoints only, so it is safe on live.
 
 Tests run against a stubbed HTTP layer and drive the actual MCP server over an
 in-memory transport, so tool wiring, argument validation, and result formatting
-are all covered without network access. The lifecycle script closes the
-remaining gap by exercising order creation and the mutation actions against
-sandbox, where orders are never fulfilled or charged.
-
-Note that `sandbox-order-check.mjs` hardcodes the attribute set for
-`GLOBAL-CAN-10X10`. Point it at a different SKU via `PRODIGI_TEST_SKU` and you
-must first read that product's required attributes with `prodigi_get_product`.
+are all covered without network access.
 
 ## Layout
 
 ```
 src/
   index.ts               stdio entrypoint
+  setup.ts               client registration CLI (idempotent, backs up, redacts)
   server.ts              server construction, tool wiring, instructions
   docs.ts                workflow guidance text
   resources.ts           resource + template registration
   prodigi/
-    types.ts             API types
+    types.ts             API types (read-only shapes)
     config.ts            env loading and validation
     client.ts            HTTP client, error mapping, pagination
-    api.ts               one method per endpoint
+    api.ts               one method per read endpoint
   tools/
     schemas.ts           shared Zod schemas
     products.ts          SKU and spine lookups
     quotes.ts            quoting
-    orders.ts            create, get, list
-    order-actions.ts     cancel, update shipping/recipient/metadata
+    orders.ts            get, list
     error-handler.ts     wraps handlers so API errors reach the model usefully
+scripts/
+  smoke.mjs              boots the real stdio server, inspects the surface
+  live-check.mjs         read-only calls against a real account
+  pty-setup-check.py     drives the interactive installer through a PTY
 ```
 
 ## License

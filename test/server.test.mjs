@@ -150,18 +150,12 @@ describe("MCP server surface", () => {
     const names = tools.map((t) => t.name).sort();
 
     assert.deepEqual(names, [
-      "prodigi_cancel_order",
-      "prodigi_create_order",
       "prodigi_create_quote",
       "prodigi_get_configuration",
       "prodigi_get_order",
-      "prodigi_get_order_actions",
       "prodigi_get_product",
       "prodigi_get_spine_info",
       "prodigi_list_orders",
-      "prodigi_update_order_metadata",
-      "prodigi_update_recipient",
-      "prodigi_update_shipping_method",
     ]);
 
     for (const tool of tools) {
@@ -191,42 +185,50 @@ describe("MCP server surface", () => {
     await client.close();
   });
 
-  it("marks the configuration tool read-only and orders as destructive", async () => {
+  it("exposes no tool that writes, and marks every tool read-only", async () => {
     const { client } = await connect([]);
     const { tools } = await client.listTools();
-    const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
 
-    assert.equal(byName["prodigi_create_order"].annotations.destructiveHint, true);
-    assert.equal(byName["prodigi_cancel_order"].annotations.destructiveHint, true);
-    assert.equal(byName["prodigi_get_product"].annotations.readOnlyHint, true);
-    assert.equal(byName["prodigi_create_quote"].annotations.readOnlyHint, true);
+    for (const tool of tools) {
+      assert.equal(
+        tool.annotations?.destructiveHint,
+        undefined,
+        `${tool.name} must not be advertised as destructive; it should not exist`,
+      );
+      assert.equal(
+        tool.annotations?.readOnlyHint,
+        true,
+        `${tool.name} must declare itself read-only`,
+      );
+    }
+
+    // Guard against a write tool being reintroduced under a new name.
+    for (const tool of tools) {
+      assert.doesNotMatch(
+        tool.name,
+        /create_order|cancel|update_|delete|remove|submit|refund/,
+        `${tool.name} looks like a mutating tool`,
+      );
+    }
     await client.close();
   });
 
-  it("rejects an invalid shipping method before calling the API", async () => {
-    const { client, calls } = await connect([]);
-    const result = await client.callTool({
-      name: "prodigi_create_order",
-      arguments: {
-        recipient: {
-          name: "A",
-          address: {
-            line1: "x",
-            postalOrZipCode: "1",
-            countryCode: "USA",
-            townOrCity: "y",
-          },
-        },
-        shippingMethod: "Teleport",
-        items: [
-          { sku: "GLOBAL-CAN-10X10", copies: 1, assets: [{ url: "https://x/y.png" }] },
-        ],
-      },
-    });
-    assert.equal(result.isError, true);
-    assert.equal(calls.length, 0, "invalid input must not reach the network");
+  it("rejects calls to tools that are not registered", async () => {
+    const { client } = await connect([]);
+    for (const name of [
+      "prodigi_create_order",
+      "prodigi_cancel_order",
+      "prodigi_update_recipient",
+      "prodigi_update_shipping_method",
+      "prodigi_update_order_metadata",
+      "prodigi_get_order_actions",
+    ]) {
+      const result = await client.callTool({ name, arguments: {} });
+      assert.equal(result.isError, true, `${name} must not be callable`);
+    }
     await client.close();
   });
+
 
   it("renders a product definition", async () => {
     const { client, calls } = await connect([{ body: PRODUCT_RESPONSE }]);
@@ -281,146 +283,9 @@ describe("MCP server surface", () => {
     await client.close();
   });
 
-  it("creates an order and summarises the result", async () => {
-    const { client, calls } = await connect([{ body: ORDER_RESPONSE }]);
-    const result = await client.callTool({
-      name: "prodigi_create_order",
-      arguments: {
-        recipient: {
-          name: "Mr Test",
-          email: "test@example.com",
-          address: {
-            line1: "14 test place",
-            postalOrZipCode: "12345",
-            countryCode: "US",
-            townOrCity: "somewhere",
-          },
-        },
-        shippingMethod: "Budget",
-        idempotencyKey: "guid-1234",
-        items: [
-          {
-            sku: "GLOBAL-CAN-10X10",
-            copies: 1,
-            sizing: "fillPrintArea",
-            assets: [
-              {
-                printArea: "default",
-                url: "https://example.com/image.png",
-              },
-            ],
-          },
-        ],
-      },
-    });
-    const output = text(result);
-    assert.match(output, /Order created and submitted to fulfilment/);
-    assert.match(output, /ord_840797/);
-    assert.match(output, /MY-REF-1/);
 
-    const sent = JSON.parse(calls[0].init.body);
-    assert.equal(sent.idempotencyKey, "guid-1234");
-    assert.equal(sent.items[0].sizing, "fillPrintArea");
-    assert.equal(sent.items[0].assets[0].printArea, "default");
-    await client.close();
-  });
 
-  it("defaults sizing and printArea when omitted", async () => {
-    const { client, calls } = await connect([{ body: ORDER_RESPONSE }]);
-    await client.callTool({
-      name: "prodigi_create_order",
-      arguments: {
-        recipient: {
-          name: "Mr Test",
-          address: {
-            line1: "14 test place",
-            postalOrZipCode: "12345",
-            countryCode: "US",
-            townOrCity: "somewhere",
-          },
-        },
-        shippingMethod: "Budget",
-        items: [
-          {
-            sku: "GLOBAL-CAN-10X10",
-            copies: 1,
-            assets: [{ url: "https://example.com/image.png" }],
-          },
-        ],
-      },
-    });
-    const sent = JSON.parse(calls[0].init.body);
-    assert.equal(sent.items[0].sizing, "fillPrintArea");
-    assert.equal(sent.items[0].assets[0].printArea, "default");
-    await client.close();
-  });
 
-  it("warns when an order is created with issues", async () => {
-    const body = structuredClone(ORDER_RESPONSE);
-    body.outcome = "CreatedWithIssues";
-    body.order.status.issues = [
-      {
-        objectId: "ori_926887",
-        errorCode: "order.items.assets.NotDownloaded",
-        description: "Download attempt 1 of 10 failed",
-      },
-    ];
-    const { client } = await connect([{ body }]);
-    const result = await client.callTool({
-      name: "prodigi_create_order",
-      arguments: {
-        recipient: {
-          name: "Mr Test",
-          address: {
-            line1: "14 test place",
-            postalOrZipCode: "12345",
-            countryCode: "US",
-            townOrCity: "somewhere",
-          },
-        },
-        shippingMethod: "Budget",
-        items: [
-          {
-            sku: "GLOBAL-CAN-10X10",
-            copies: 1,
-            assets: [{ url: "https://example.com/i.png" }],
-          },
-        ],
-      },
-    });
-    const output = text(result);
-    assert.match(output, /Issues needing attention/);
-    assert.match(output, /NotDownloaded/);
-    await client.close();
-  });
-
-  it("reports per-shipment results when a change is partial", async () => {
-    const { client } = await connect([
-      {
-        body: {
-          outcome: "partiallyUpdated",
-          order: ORDER_RESPONSE.order,
-          shipmentUpdateResults: [
-            { shipmentId: "shp_1", successful: true },
-            {
-              shipmentId: "shp_2",
-              successful: false,
-              errorCode: "order.shipments.notAvailable",
-            },
-          ],
-        },
-      },
-    ]);
-    const result = await client.callTool({
-      name: "prodigi_update_shipping_method",
-      arguments: { prodigiOrderId: "ord_840797", shippingMethod: "Express" },
-    });
-    const output = text(result);
-    assert.match(output, /shp_1.*updated/s);
-    assert.match(output, /shp_2.*NOT updated/s);
-    assert.match(output, /partiallyUpdated/);
-    await client.close();
-  });
 
   it("surfaces API errors with the trace id", async () => {
     const { client } = await connect([

@@ -2,13 +2,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ProdigiApi } from "../prodigi/api.js";
 import type { Order, OrderItem } from "../prodigi/types.js";
 import { z } from "zod";
-import {
-  brandingSchema,
-  orderItemSchema,
-  recipientSchema,
-  shippingMethodSchema,
-  summariseOrderOutcome,
-} from "./schemas.js";
 import { registerTool } from "./error-handler.js";
 
 /** Order read tools. */
@@ -141,121 +134,6 @@ export function registerOrderReadTools(server: McpServer, api: ProdigiApi): void
         ],
       };
     },
-  );
-}
-
-/** Order mutation tools. These place real, billable orders. */
-export function registerOrderWriteTools(server: McpServer, api: ProdigiApi): void {
-  registerTool(
-    server,
-    "prodigi_create_order",
-    {
-      title: "Create a Prodigi order",
-      description:
-        "Submit a real order to the Prodigi print network. This incurs charges " +
-        "and starts fulfilment as soon as the configured pause window expires, " +
-        "so it should only be called after the customer has committed to " +
-        "purchasing. Validate every SKU with prodigi_get_product and price the " +
-        "basket with prodigi_create_quote first. Each item needs at least one " +
-        "asset URL that is publicly downloadable.",
-      annotations: {
-        destructiveHint: true,
-        idempotentHint: false,
-        openWorldHint: true,
-      },
-      inputSchema: {
-        recipient: recipientSchema,
-        items: z
-          .array(orderItemSchema)
-          .min(1)
-          .describe("Products to print and ship."),
-        shippingMethod: shippingMethodSchema,
-        merchantReference: z
-          .string()
-          .optional()
-          .describe(
-            "Your own reference for this order, e.g. your internal order " +
-              "number. Echoed back on every callback. Note: duplicate detection " +
-              "uses idempotencyKey, not this field.",
-          ),
-        idempotencyKey: z
-          .string()
-          .optional()
-          .describe(
-            "A unique key (e.g. a GUID) for this order. If Prodigi has already " +
-              "seen the key it returns the existing order instead of creating a " +
-              "duplicate, which makes retries safe. Recommended for any system " +
-              "where exactly-once submission cannot otherwise be guaranteed.",
-          ),
-        callbackUrl: z
-          .string()
-          .url()
-          .optional()
-          .describe(
-            "Public HTTPS URL to receive CloudEvents callbacks when the order " +
-              "stage changes. Overrides the account-wide default.",
-          ),
-        branding: brandingSchema.optional(),
-        metadata: z
-          .record(z.string(), z.unknown())
-          .optional()
-          .describe(
-            "Arbitrary JSON (max 2000 characters) stored on the order and " +
-              "returned in callbacks. Useful for round-tripping your own " +
-              "internal context.",
-          ),
-      },
-    },
-    async (args, extra) => {
-      const { outcome, order, traceParent } = await api.createOrder(args, {
-        signal: extra.signal,
-      });
-
-      if (!order) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `The API accepted the request (outcome "${outcome}") but ` +
-                `returned no order object.` +
-                (traceParent ? ` traceParent: ${traceParent}` : ""),
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      const warning =
-        outcome === "CreatedWithIssues" ? renderIssues(order) : "";
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text:
-              `${summariseOrderOutcome(outcome)}\n\n` +
-              renderOrder(order, "full") +
-              warning,
-          },
-        ],
-      };
-    },
-  );
-}
-
-function renderIssues(order: Order): string {
-  const issues = order.status?.issues ?? [];
-  if (issues.length === 0) return "";
-  return (
-    `\n## Issues needing attention\n` +
-    issues
-      .map(
-        (issue) =>
-          `- **${issue.errorCode}**${issue.objectId ? ` on ${issue.objectId}` : ""}: ` +
-          issue.description,
-      )
-      .join("\n")
   );
 }
 

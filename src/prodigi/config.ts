@@ -84,5 +84,6 @@ export function describeConfig(config: ProdigiConfig): string {
     `baseUrl:    ${config.baseUrl}`,
     `apiKey:     ${masked}`,
     `timeoutMs:  ${config.timeoutMs}`,
+    `mode:       READ-ONLY (cannot place, change or cancel orders)`,
   ].join("\n");
 }
